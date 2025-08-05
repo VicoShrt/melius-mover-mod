@@ -7,6 +7,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.*;
 
 public class MeliusMover implements ModInitializer {
@@ -19,30 +21,52 @@ public class MeliusMover implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
-		// This code runs as soon as Minecraft is in a mod-load-ready state.
-		// However, some things (like resources) may still be uninitialized.
-		// Proceed with mild caution.
 
-		String internalPath = "/assets/melius-mover/data/melius_command/command.json";
+		String internalFolderPath = "/assets/melius-mover/data/melius_commands/";
 		Path configDir = Path.of(System.getProperty("user.dir"), "config", "melius-commands", "commands");
-		Path outputFile = configDir.resolve("deano_command.json");
 
-		if (Files.notExists(outputFile)) {
-			try {
-				Files.createDirectories(configDir);
+		try {
+			Files.createDirectories(configDir);
 
-				try (InputStream in = MeliusMover.class.getResourceAsStream(internalPath)) {
-					if (in != null) {
-						Files.copy(in, outputFile, StandardCopyOption.REPLACE_EXISTING);
-						System.out.println("Copied my_commands.json to config folder.");
-					} else {
-						System.err.println("Could not find internal JSON: " + internalPath);
-					}
+			// Get the JAR file that contains this class
+			URI jarUri = MeliusMover.class.getProtectionDomain().getCodeSource().getLocation().toURI();
+			Path jarPath = Paths.get(jarUri);
+
+			// Create a file system for the JAR
+			try (FileSystem jarFileSystem = FileSystems.newFileSystem(jarPath, (ClassLoader) null)) {
+				Path internalFolder = jarFileSystem.getPath(internalFolderPath);
+
+				if (Files.exists(internalFolder) && Files.isDirectory(internalFolder)) {
+					// Walk through all files in the internal folder
+					Files.walk(internalFolder)
+							.filter(Files::isRegularFile)
+							.forEach(sourceFile -> {
+								try {
+									// Get the relative path from the internal folder
+									Path relativePath = internalFolder.relativize(sourceFile);
+									Path targetFile = configDir.resolve(relativePath.toString());
+
+									// Create parent directories if they don't exist
+									Files.createDirectories(targetFile.getParent());
+
+									// Copy the file, replacing if it exists
+									try (InputStream in = Files.newInputStream(sourceFile)) {
+										Files.copy(in, targetFile, StandardCopyOption.REPLACE_EXISTING);
+										System.out.println("Copied " + relativePath.getFileName() + " to config folder.");
+									}
+								} catch (IOException e) {
+									LOGGER.error("Failed to copy file: " + sourceFile.getFileName(), e);
+								}
+							});
+
+					System.out.println("Successfully copied all files from " + internalFolderPath);
+				} else {
+					System.err.println("Internal folder not found: " + internalFolderPath);
 				}
-
-			} catch (IOException e) {
-				LOGGER.error(e.toString());
 			}
+
+		} catch (IOException | URISyntaxException e) {
+			LOGGER.error("Error copying files from jar", e);
 		}
 	}
 }
